@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://mediavault-assessment-production.up.railway.app/api/:path*"
+    }
+  ]
+}

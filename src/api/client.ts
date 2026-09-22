@@ -1,15 +1,6 @@
 import type { Asset, AssetPage, AssetQuery, BulkResult } from '@/lib/types';
 
-/**
- * Baseline client. It works on a good network and falls apart on a bad one.
- *
- * Known gaps, all of which are yours to close:
- *   - no request cancellation
- *   - no retry, no backoff, no handling of Retry-After
- *   - no de-duplication of concurrent identical requests
- *   - error information is flattened into a string
- *   - callers cannot distinguish "retry this" from "do not retry this"
- */
+const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
 function toSearchParams(query: AssetQuery): string {
   const params = new URLSearchParams();
@@ -47,17 +38,39 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function runWithConcurrency<T>(
+  tasks: (() => Promise<T>)[],
+  limit: number
+): Promise<T[]> {
+  const results: T[] = new Array(tasks.length);
+  let index = 0;
+
+  async function worker() {
+    while (index < tasks.length) {
+      const current = index++;
+      const task = tasks[current];
+      if (!task) continue;
+      results[current] = await task();
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, tasks.length) }, () => worker())
+  );
+
+  return results;
+}
+
 export function listAssets(query: AssetQuery, init?: RequestInit): Promise<AssetPage> {
-  return request<AssetPage>(`/api/assets?${toSearchParams(query)}`, init);
+  return request<AssetPage>(`${API_BASE}/api/assets?${toSearchParams(query)}`, init);
 }
 
 export function getAsset(id: string): Promise<Asset> {
-  return request<Asset>(`/api/assets/${id}`);
+  return request<Asset>(`${API_BASE}/api/assets/${id}`);
 }
 
 export function getAssetsByIds(ids: string[]): Promise<{ items: Asset[]; missing: string[] }> {
-  // Note: the endpoint rejects more than 25 ids per call.
-  return request(`/api/assets/batch?ids=${ids.join(',')}`);
+  return request(`${API_BASE}/api/assets/batch?ids=${ids.join(',')}`);
 }
 
 export function updateAsset(
@@ -65,7 +78,7 @@ export function updateAsset(
   version: number,
   patch: Partial<Pick<Asset, 'name' | 'status' | 'tags'>>,
 ): Promise<Asset> {
-  return request<Asset>(`/api/assets/${id}`, {
+  return request<Asset>(`${API_BASE}/api/assets/${id}`, {
     method: 'PATCH',
     body: JSON.stringify({ version, patch }),
   });
@@ -84,7 +97,7 @@ export async function bulkSetStatus(
   }
 
   const tasks = chunks.map((chunk) => () =>
-    request<BulkResult>('/api/assets/bulk-status', {
+    request<BulkResult>(`${API_BASE}/api/assets/bulk-status`, {
       method: 'POST',
       body: JSON.stringify({ ids: chunk, status }),
     })
@@ -102,28 +115,4 @@ export async function bulkSetStatus(
   );
 }
 
-
-async function runWithConcurrency<T>(
-  tasks: (() => Promise<T>)[],
-  limit: number
-): Promise<T[]> {
-  const results: T[] = [];
-  let index = 0;
-
-  async function worker() {
-    while (index < tasks.length) {
-      const current = index++;
-      const task = tasks[current];
-      if (!task) continue;
-        results[current] = await task();
-      }
-  }
-
-  await Promise.all(
-    Array.from({ length: Math.min(limit, tasks.length) }, () => worker())
-  );
-
-  return results;
-}
-
-export const thumbnailUrl = (id: string) => `/api/thumb/${id}.svg`;
+export const thumbnailUrl = (id: string) => `${API_BASE}/api/thumb/${id}.svg`;
